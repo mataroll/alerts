@@ -334,16 +334,34 @@ searchEl.addEventListener('input', () => {
   sugEl.innerHTML = '';
   if (q.length < 2) { sugEl.style.display = 'none'; return; }
 
+  const isHebrew = /[\u0590-\u05FF]/.test(q);
   const zones  = new Map();
   const cities = [];
   for (const c of citiesList) {
-    if ((c.zone_en||'').toLowerCase().includes(q) && !zones.has(c.zone_en)) zones.set(c.zone_en, c);
-    if ((c.name_en||'').toLowerCase().includes(q)) cities.push(c);
+    const zoneMatch = isHebrew
+      ? (c.zone||'').includes(q)
+      : (c.zone_en||'').toLowerCase().includes(q);
+    const cityMatch = isHebrew
+      ? (c.name||'').includes(q)
+      : (c.name_en||'').toLowerCase().includes(q);
+    const zoneKey = isHebrew ? (c.zone||c.zone_en) : c.zone_en;
+    if (zoneMatch && !zones.has(zoneKey)) zones.set(zoneKey, c);
+    if (cityMatch) cities.push(c);
   }
 
   const results = [];
-  for (const [zone] of zones) { results.push({label: zone, sub: 'Region', isZone: true, zone}); if (results.length>=4) break; }
-  for (const c of cities)      { results.push({label: c.name_en||c.name, sub: c.zone_en||'', isZone: false, city: c}); if (results.length>=10) break; }
+  for (const [zone, c] of zones) {
+    const label = isHebrew ? (c.zone||zone) : zone;
+    const sub   = isHebrew ? (c.zone_en||'') : 'Region';
+    results.push({label, sub, isZone: true, zone: c.zone_en});
+    if (results.length >= 4) break;
+  }
+  for (const c of cities) {
+    const label = isHebrew ? (c.name||c.name_en) : (c.name_en||c.name);
+    const sub   = isHebrew ? (c.zone||c.zone_en||'') : (c.zone_en||'');
+    results.push({label, sub, isZone: false, city: c});
+    if (results.length >= 10) break;
+  }
 
   if (!results.length) { sugEl.style.display='none'; return; }
   for (const r of results) {
