@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Israel Live Alerts</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; display: flex; height: 100vh; background: #111; color: #eee; }
+
+    #sidebar {
+      width: 300px; min-width: 300px;
+      background: #1a1a1a;
+      display: flex; flex-direction: column;
+      border-right: 1px solid #333;
+      overflow: hidden;
+    }
+    #sidebar h1 { padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #333; background: #222; }
+
+    #status {
+      padding: 8px 14px; font-size: 12px; color: #888;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+    #dot.active { background: #e74c3c; box-shadow: 0 0 8px #e74c3c; animation: blink 1s infinite; }
+    #dot.ok { background: #2ecc71; }
+    #dot.connecting { background: #f39c12; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+    #tabs { display: flex; border-bottom: 1px solid #333; background: #1e1e1e; }
+    .tab {
+      flex: 1; padding: 8px 4px; font-size: 12px; text-align: center;
+      cursor: pointer; color: #666; border-bottom: 2px solid transparent;
+    }
+    .tab.active { color: #eee; border-bottom-color: #e74c3c; }
+
+    #search-wrap { padding: 10px 12px; border-bottom: 1px solid #2a2a2a; position: relative; }
+    #search {
+      width: 100%; padding: 7px 10px; background: #252525;
+      border: 1px solid #3a3a3a; border-radius: 4px;
+      color: #eee; font-size: 13px; outline: none;
+    }
+    #search:focus { border-color: #555; }
+    #suggestions {
+      position: absolute; left: 12px; right: 12px; top: 100%;
+      background: #252525; border: 1px solid #3a3a3a; border-top: none;
+      border-radius: 0 0 4px 4px; max-height: 160px; overflow-y: auto;
+      display: none; z-index: 999;
+    }
+    .suggestion { padding: 7px 10px; font-size: 12px; cursor: pointer; }
+    .suggestion:hover { background: #333; }
+    .sug-zone { font-size: 11px; color: #888; }
+
+    #panel { flex: 1; overflow-y: auto; }
+
+    /* Live */
+    .alert-item { padding: 10px 14px; border-bottom: 1px solid #2a2a2a; font-size: 13px; }
+    .alert-item .city { font-weight: bold; color: #e74c3c; }
+    .alert-item .zone { font-size: 11px; color: #888; margin-top: 2px; }
+    .alert-item .countdown { font-size: 11px; color: #f39c12; margin-top: 2px; }
+
+    /* Region */
+    #region-panel { padding: 12px; }
+    #region-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; }
+    .stat-box { background: #222; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+    .stat-box .label { font-size: 11px; color: #888; margin-bottom: 4px; }
+    .stat-box .value { font-size: 20px; font-weight: bold; color: #e74c3c; }
+    .stat-box .value.none { color: #2ecc71; font-size: 13px; }
+    #history-list { margin-top: 10px; }
+    .hist-item { padding: 7px 0; border-bottom: 1px solid #2a2a2a; font-size: 12px; }
+    .hist-item .hcity { font-weight: bold; }
+    .hist-item .hdate { color: #888; font-size: 11px; margin-top: 2px; }
+
+    #map { flex: 1; }
+    #error-bar {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0;
+      background: #c0392b; color: white;
+      padding: 8px 16px; font-size: 12px; text-align: center; z-index: 9999;
+    }
+  </style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>🚨 Israel Live Alerts</h1>
+  <div id="status"><div id="dot" class="connecting"></div><span id="status-text">Connecting...</span></div>
+
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search city or region...">
+    <div id="suggestions"></div>
+  </div>
+
+  <div id="tabs">
+    <div class="tab active" onclick="switchTab('live')">Live</div>
+    <div class="tab" onclick="switchTab('region')">Region</div>
+    <div class="tab" onclick="testAlert()" style="color:#f39c12">Test</div>
+  </div>
+
+  <div id="panel">
+    <div id="tab-live">
+      <div id="alert-list">
+        <div style="padding:20px;font-size:13px;color:#555;text-align:center">No active alerts</div>
+      </div>
+    </div>
+    <div id="tab-region" style="display:none">
+      <div id="region-panel">
+        <div id="empty-region" style="color:#555;font-size:13px;text-align:center;padding-top:20px">
+          Search for a city or region above
+        </div>
+        <div id="region-content" style="display:none">
+          <div id="region-title"></div>
+          <div id="stats-boxes"></div>
+          <div id="history-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="map"></div>
+<div id="error-bar"></div>
+
+<script>
+const WORKER = 'https://tight-star-aab7.mataroll123.workers.dev';
+const LIVE_URL = `${WORKER}?url=${encodeURIComponent('https://www.oref.org.il/WarningMessages/alert/alerts.json')}`;
+
+// ── Map ────────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([31.5, 34.9], 8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors', maxZoom: 18
+}).addTo(map);
+
+// ── State ──────────────────────────────────────────────────────────────────
+let citiesMap  = {};
+let citiesList = [];
+let activeMarkers = {};
+let searchMarkers = [];
+
+// ── Cities DB ──────────────────────────────────────────────────────────────
+async function loadCities() {
+  const res  = await fetch('https://raw.githubusercontent.com/eladnava/pikud-haoref-api/master/cities.json');
+  const data = await res.json();
+  citiesList = data.filter(c => c.lat && c.lng && c.lat !== 0);
+  for (const c of citiesList) { citiesMap[c.value] = c; citiesMap[c.name] = c; }
+}
+
+// ── Icons ──────────────────────────────────────────────────────────────────
+const redIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:14px;height:14px;border-radius:50%;background:#e74c3c;border:2px solid #fff;box-shadow:0 0 10px #e74c3c;animation:blink 1s infinite"></div>',
+  iconSize: [14,14], iconAnchor: [7,7]
+});
+const blueIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:10px;height:10px;border-radius:50%;background:#3498db;border:2px solid #fff"></div>',
+  iconSize: [10,10], iconAnchor: [5,5]
+});
+
+// ── Status ─────────────────────────────────────────────────────────────────
+function setStatus(state, text) {
+  // state: 'active' | 'ok' | 'connecting'
+  document.getElementById('dot').className = state;
+  document.getElementById('status-text').textContent = text;
+}
+function showError(msg) {
+  const b = document.getElementById('error-bar');
+  b.textContent = msg; b.style.display = 'block';
+  setTimeout(() => b.style.display = 'none', 6000);
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) =>
+    t.classList.toggle('active', (i===0&&tab==='live')||(i===1&&tab==='region')));
+  document.getElementById('tab-live').style.display   = tab==='live'   ? '' : 'none';
+  document.getElementById('tab-region').style.display = tab==='region' ? '' : 'none';
+}
+
+// ── Render live alerts ─────────────────────────────────────────────────────
+function renderAlerts(cities) {
+  for (const m of Object.values(activeMarkers)) m.remove();
+  activeMarkers = {};
+  const list = document.getElementById('alert-list');
+
+  if (!cities || !cities.length) {
+    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">No active alerts</div>';
+    setStatus('ok', 'No active alerts');
+    return;
+  }
+
+  list.innerHTML = '';
+  setStatus('active', `${cities.length} area${cities.length>1?'s':''} under alert`);
+  const bounds = [];
+  for (const name of cities) {
+    const c = citiesMap[name];
+    const div = document.createElement('div');
+    div.className = 'alert-item';
+    div.innerHTML = `
+      <div class="city">${c ? c.name_en||name : name}</div>
+      <div class="zone">${c ? c.zone_en||'' : ''}</div>
+      ${c&&c.countdown ? `<div class="countdown">⏱ ${c.countdown}s to shelter</div>` : ''}
+    `;
+    list.appendChild(div);
+    if (c) {
+      const m = L.marker([c.lat,c.lng],{icon:redIcon}).addTo(map)
+        .bindPopup(`<b>${c.name_en||name}</b><br>${c.zone_en||''}`);
+      activeMarkers[name] = m;
+      bounds.push([c.lat,c.lng]);
+    }
+  }
+  if (bounds.length) map.fitBounds(bounds, {padding:[60,60], maxZoom:10});
+}
+
+// ── WebSocket (tzevadom real-time) ─────────────────────────────────────────
+let ws, wsReady = false, wsFallbackTimer;
+
+function connectWS() {
+  setStatus('connecting', 'Connecting...');
+  ws = new WebSocket('wss://tzevadom.com/api/ws');
+
+  ws.onopen = () => {
+    wsReady = true;
+    clearTimeout(wsFallbackTimer);
+    setStatus('ok', 'No active alerts');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      // tzevadom sends various message types — find cities array
+      const cities = msg.cities || msg.data || msg.alerts || (Array.isArray(msg) ? msg : null);
+      if (Array.isArray(cities) && cities.length > 0) {
+        // cities may be objects or strings
+        const names = cities.map(c => typeof c === 'string' ? c : c.name || c.city || c.value || '');
+        renderAlerts(names);
+      } else if (msg.type === 'clear' || (Array.isArray(cities) && cities.length === 0)) {
+        renderAlerts([]);
+      }
+    } catch {}
+  };
+
+  ws.onclose = () => {
+    wsReady = false;
+    setStatus('connecting', 'Reconnecting...');
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+    // fallback to polling if WS fails
+    wsFallbackTimer = setTimeout(() => {
+      if (!wsReady) startPolling();
+    }, 5000);
+  };
+}
+
+// ── Polling fallback ───────────────────────────────────────────────────────
+let lastAlertId = null, polling = false;
+
+function startPolling() {
+  if (polling) return;
+  polling = true;
+  setStatus('ok', 'Polling for alerts...');
+  fetchAlerts();
+  setInterval(fetchAlerts, 2000);
+}
+
+async function fetchAlerts() {
+  try {
+    const res  = await fetch(LIVE_URL, { cache: 'no-store' });
+    const text = await res.text();
+    if (!text || !text.trim()) { renderAlerts([]); return; }
+    let data;
+    try { data = JSON.parse(text); } catch { renderAlerts([]); return; }
+    const id     = data?.id || data?.current?.id || null;
+    const cities = data?.data || data?.current?.data || [];
+    if (id !== lastAlertId || (id===null && cities.length !== Object.keys(activeMarkers).length)) {
+      lastAlertId = id;
+      renderAlerts(cities);
+    }
+    if (!wsReady) setStatus(cities.length ? 'active' : 'ok', cities.length ? `${cities.length} area(s) under alert` : 'No active alerts');
+  } catch {}
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────
+const searchEl = document.getElementById('search');
+const sugEl    = document.getElementById('suggestions');
+
+searchEl.addEventListener('input', () => {
+  const q = searchEl.value.trim().toLowerCase();
+  sugEl.innerHTML = '';
+  if (q.length < 2) { sugEl.style.display = 'none'; return; }
+
+  const zones  = new Map();
+  const cities = [];
+  for (const c of citiesList) {
+    if ((c.zone_en||'').toLowerCase().includes(q) && !zones.has(c.zone_en)) zones.set(c.zone_en, c);
+    if ((c.name_en||'').toLowerCase().includes(q)) cities.push(c);
+  }
+
+  const results = [];
+  for (const [zone] of zones) { results.push({label: zone, sub: 'Region', isZone: true, zone}); if (results.length>=4) break; }
+  for (const c of cities)      { results.push({label: c.name_en||c.name, sub: c.zone_en||'', isZone: false, city: c}); if (results.length>=10) break; }
+
+  if (!results.length) { sugEl.style.display='none'; return; }
+  for (const r of results) {
+    const d = document.createElement('div');
+    d.className = 'suggestion';
+    d.innerHTML = `<div>${r.label}</div><div class="sug-zone">${r.sub}</div>`;
+    d.onclick = () => selectResult(r);
+    sugEl.appendChild(d);
+  }
+  sugEl.style.display = 'block';
+});
+
+document.addEventListener('click', e => { if (!e.target.closest('#search-wrap')) sugEl.style.display='none'; });
+
+function selectResult(r) {
+  searchEl.value = r.label;
+  sugEl.style.display = 'none';
+  for (const m of searchMarkers) m.remove();
+  searchMarkers = [];
+
+  const match = r.isZone ? citiesList.filter(c => c.zone_en === r.zone) : [r.city];
+  const bounds = [];
+  for (const c of match) {
+    const m = L.marker([c.lat,c.lng],{icon:blueIcon}).addTo(map)
+      .bindPopup(`<b>${c.name_en||c.name}</b><br>${c.zone_en||''}`);
+    searchMarkers.push(m);
+    bounds.push([c.lat,c.lng]);
+  }
+  if (bounds.length) map.fitBounds(bounds, {padding:[60,60], maxZoom:11});
+  switchTab('region');
+  loadRegionStats(r.label, match); // async, updates panel when ready
+}
+
+// ── History (from Worker KV — recorded 24/7) ───────────────────────────────
+let cachedHistory = null;
+
+async function getHistory() {
+  if (cachedHistory) return cachedHistory;
+  try {
+    const res = await fetch(`${WORKER}/history`);
+    cachedHistory = await res.json();
+    setTimeout(() => cachedHistory = null, 60000); // refresh every minute
+  } catch { cachedHistory = []; }
+  return cachedHistory;
+}
+
+// ── Region stats ───────────────────────────────────────────────────────────
+async function loadRegionStats(label, matchCities) {
+  document.getElementById('empty-region').style.display = 'none';
+  document.getElementById('region-content').style.display = '';
+  document.getElementById('region-title').textContent = label;
+  document.getElementById('stats-boxes').innerHTML = '<div style="color:#888;font-size:12px">Loading history...</div>';
+  document.getElementById('history-list').innerHTML = '';
+
+  const cityValues = new Set(matchCities.map(c => c.value));
+  const cityNames  = new Set(matchCities.map(c => c.name));
+
+  const history  = await getHistory();
+  const relevant = history.filter(h => cityValues.has(h.name) || cityNames.has(h.name));
+
+  const total = relevant.length;
+  const last  = relevant[0]?.date || null;
+
+  const counts = {};
+  for (const h of relevant) {
+    const c    = citiesMap[h.name];
+    const name = c ? (c.name_en||h.name) : h.name;
+    counts[name] = (counts[name]||0) + 1;
+  }
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+
+  document.getElementById('stats-boxes').innerHTML = `
+    <div class="stat-box">
+      <div class="label">Total alerts recorded</div>
+      <div class="value">${total || '—'}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Last alert</div>
+      <div class="value ${!last?'none':''}" style="${last?'':'font-size:13px'}">${last || 'None recorded yet'}</div>
+    </div>
+    ${top ? `<div class="stat-box"><div class="label">Most hit city</div><div class="value" style="font-size:15px">${top[0]} <span style="font-size:11px;color:#aaa">${top[1]}x</span></div></div>` : ''}
+  `;
+
+  const histEl = document.getElementById('history-list');
+  if (!relevant.length) {
+    histEl.innerHTML = '<div style="color:#555;font-size:12px;padding-top:8px">No alerts recorded yet for this area</div>';
+    return;
+  }
+  histEl.innerHTML = '<div style="font-size:11px;color:#888;margin-bottom:6px">Recorded alerts</div>';
+  for (const h of relevant.slice(0,50)) {
+    const c    = citiesMap[h.name];
+    const name = c ? (c.name_en||h.name) : h.name;
+    const d = document.createElement('div');
+    d.className = 'hist-item';
+    d.innerHTML = `<div class="hcity">${name}</div><div class="hdate">${h.date} · ${h.title}</div>`;
+    histEl.appendChild(d);
+  }
+}
+
+function renderRegionStats(label, items, matchCities) {
+  const total = items.length;
+
+  // find last alert date
+  const dates = items.map(i => i.date || i.alertDate || i.time || '').filter(Boolean).sort().reverse();
+  const last  = dates[0] ? dates[0].slice(0,16) : null;
+
+  // most hit city
+  const counts = {};
+  for (const i of items) {
+    const city = i.city || i.name || i.data || i.area || '';
+    const c    = citiesMap[city];
+    const name = c ? (c.name_en||city) : city;
+    if (name) counts[name] = (counts[name]||0) + 1;
+  }
+  const top = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+
+  document.getElementById('stats-boxes').innerHTML = `
+    <div class="stat-box">
+      <div class="label">Alerts in last 90 days</div>
+      <div class="value">${total}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Last alert</div>
+      <div class="value ${!last?'none':''}" style="${last?'':'font-size:13px'}">${last || 'None on record'}</div>
+    </div>
+    ${top ? `<div class="stat-box"><div class="label">Most hit city</div><div class="value" style="font-size:15px">${top[0]} <span style="font-size:11px;color:#aaa">${top[1]}x</span></div></div>` : ''}
+  `;
+
+  const histEl = document.getElementById('history-list');
+  if (!items.length) {
+    histEl.innerHTML = '<div style="color:#555;font-size:12px;padding-top:8px">No alerts in last 90 days</div>';
+    return;
+  }
+  histEl.innerHTML = '<div style="font-size:11px;color:#888;margin-bottom:6px">Recent alerts</div>';
+  for (const item of items.slice(0,30)) {
+    const city  = item.city || item.name || item.data || item.area || '';
+    const c     = citiesMap[city];
+    const name  = c ? (c.name_en||city) : city;
+    const date  = (item.date || item.alertDate || item.time || '').slice(0,16);
+    const type  = item.title || item.type || item.category || '';
+    const d = document.createElement('div');
+    d.className = 'hist-item';
+    d.innerHTML = `<div class="hcity">${name}</div><div class="hdate">${date}${type?' · '+type:''}</div>`;
+    histEl.appendChild(d);
+  }
+}
+
+// ── Test mode ──────────────────────────────────────────────────────────────
+let testActive = false;
+const TEST_CITIES = ['תל אביב - מרכז העיר', 'אשקלון - צפון', 'באר שבע - מרכז', 'אשדוד - א,ב,ד,ה'];
+
+function testAlert() {
+  switchTab('live');
+  if (testActive) {
+    testActive = false;
+    renderAlerts([]);
+  } else {
+    testActive = true;
+    renderAlerts(TEST_CITIES);
+    // auto-clear after 8 seconds like a real alert
+    setTimeout(() => { if (testActive) { testActive = false; renderAlerts([]); } }, 8000);
+  }
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(async () => {
+  try { await loadCities(); } catch(e) { showError('Failed to load cities: '+e.message); }
+  connectWS();
+  // Also start polling immediately as a reliable fallback
+  startPolling();
+})();
+</script>
+<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}</style>
+</body>
+</html>
