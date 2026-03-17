@@ -1,7 +1,5 @@
 {
   "functions": {
-    "api/alerts.js": {
-      "regions": ["tlv1"]
-    }
+    "api/alerts.js": {}
   }
 }

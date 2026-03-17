@@ -14,5 +14,3 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   res.send(text);
 }
-
-export const config = { regions: ['tlv1'] };
