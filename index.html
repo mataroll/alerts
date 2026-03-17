@@ -138,6 +138,7 @@ let citiesMap  = {};
 let citiesList = [];
 let activeMarkers = {};
 let searchMarkers = [];
+let lastRecordedKey = null;
 
 // ── Cities DB ──────────────────────────────────────────────────────────────
 async function loadCities() {
@@ -180,7 +181,7 @@ function switchTab(tab) {
 }
 
 // ── Render live alerts ─────────────────────────────────────────────────────
-function renderAlerts(cities) {
+function renderAlerts(cities, title) {
   for (const m of Object.values(activeMarkers)) m.remove();
   activeMarkers = {};
   const list = document.getElementById('alert-list');
@@ -212,6 +213,22 @@ function renderAlerts(cities) {
     }
   }
   if (bounds.length) map.fitBounds(bounds, {padding:[60,60], maxZoom:10});
+  if (!testActive) recordAlert(cities, title || '');
+}
+
+// ── Record alert to Worker KV ──────────────────────────────────────────────
+async function recordAlert(cities, title) {
+  const key = [...cities].sort().join(',');
+  if (key === lastRecordedKey) return;
+  lastRecordedKey = key;
+  setTimeout(() => { if (lastRecordedKey === key) lastRecordedKey = null; }, 60000);
+  try {
+    fetch(`${WORKER}/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cities, title: title || 'Alert' })
+    });
+  } catch {}
 }
 
 // ── WebSocket (tzevadom real-time) ─────────────────────────────────────────
@@ -277,9 +294,10 @@ async function fetchAlerts() {
     try { data = JSON.parse(text); } catch { renderAlerts([]); return; }
     const id     = data?.id || data?.current?.id || null;
     const cities = data?.data || data?.current?.data || [];
+    const title  = data?.title || data?.current?.title || 'Alert';
     if (id !== lastAlertId || (id===null && cities.length !== Object.keys(activeMarkers).length)) {
       lastAlertId = id;
-      renderAlerts(cities);
+      renderAlerts(cities, title);
     }
     if (!wsReady) setStatus(cities.length ? 'active' : 'ok', cities.length ? `${cities.length} area(s) under alert` : 'No active alerts');
   } catch {}
