@@ -124,7 +124,6 @@
 
 <script>
 const WORKER = 'https://tight-star-aab7.mataroll123.workers.dev';
-const LIVE_URL = `${WORKER}?url=${encodeURIComponent('https://www.oref.org.il/WarningMessages/alert/alerts.json')}`;
 
 // ── Map ────────────────────────────────────────────────────────────────────
 const map = L.map('map').setView([31.5, 34.9], 8);
@@ -253,15 +252,13 @@ async function recordAlert(cities, title) {
 }
 
 // ── WebSocket (tzevadom real-time) ─────────────────────────────────────────
-let ws, wsReady = false, wsFallbackTimer;
+let ws;
 
 function connectWS() {
   setStatus('connecting', 'מתחבר...');
   ws = new WebSocket('wss://tzevadom.com/api/ws');
 
   ws.onopen = () => {
-    wsReady = true;
-    clearTimeout(wsFallbackTimer);
     setStatus('ok', 'אין התראות פעילות');
   };
 
@@ -281,7 +278,6 @@ function connectWS() {
   };
 
   ws.onclose = () => {
-    wsReady = false;
     setStatus('connecting', 'מתחבר מחדש...');
     setTimeout(connectWS, 3000);
   };
@@ -289,40 +285,9 @@ function connectWS() {
   ws.onerror = () => {
     ws.close();
     // fallback to polling if WS fails
-    wsFallbackTimer = setTimeout(() => {
-      if (!wsReady) startPolling();
-    }, 5000);
   };
 }
 
-// ── Polling fallback ───────────────────────────────────────────────────────
-let lastAlertId = null, polling = false;
-
-function startPolling() {
-  if (polling) return;
-  polling = true;
-  setStatus('ok', 'בודק התראות...');
-  fetchAlerts();
-  setInterval(fetchAlerts, 2000);
-}
-
-async function fetchAlerts() {
-  try {
-    const res  = await fetch(LIVE_URL, { cache: 'no-store' });
-    const text = await res.text();
-    if (!text || !text.trim()) { renderAlerts([]); return; }
-    let data;
-    try { data = JSON.parse(text); } catch { renderAlerts([]); return; }
-    const id     = data?.id || data?.current?.id || null;
-    const cities = data?.data || data?.current?.data || [];
-    const title  = data?.title || data?.current?.title || 'Alert';
-    if (id !== lastAlertId || (id===null && cities.length !== Object.keys(activeMarkers).length)) {
-      lastAlertId = id;
-      renderAlerts(cities, title);
-    }
-    if (!wsReady) setStatus(cities.length ? 'active' : 'ok', cities.length ? `התראה פעילה ב־${cities.length} אזורים` : 'אין התראות פעילות');
-  } catch {}
-}
 
 // ── Search ─────────────────────────────────────────────────────────────────
 const searchEl = document.getElementById('search');
@@ -513,8 +478,6 @@ function renderRegionStats(label, items, matchCities) {
 (async () => {
   try { await loadCities(); } catch(e) { showError('Failed to load cities: '+e.message); }
   connectWS();
-  // Also start polling immediately as a reliable fallback
-  startPolling();
 })();
 </script>
 <style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}</style>
