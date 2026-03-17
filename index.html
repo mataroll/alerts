@@ -181,16 +181,38 @@ function switchTab(tab) {
 }
 
 // ── Render live alerts ─────────────────────────────────────────────────────
+let clearTimer = null;
+let accumulatedCities = {};
+
 function renderAlerts(cities, title) {
-  for (const m of Object.values(activeMarkers)) m.remove();
-  activeMarkers = {};
   const list = document.getElementById('alert-list');
 
   if (!cities || !cities.length) {
-    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">No active alerts</div>';
-    setStatus('ok', 'No active alerts');
+    // don't clear immediately — wait 60s
+    if (!clearTimer && Object.keys(accumulatedCities).length) {
+      clearTimer = setTimeout(() => {
+        accumulatedCities = {};
+        clearTimer = null;
+        for (const m of Object.values(activeMarkers)) m.remove();
+        activeMarkers = {};
+        list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">No active alerts</div>';
+        setStatus('ok', 'No active alerts');
+      }, 60000);
+    } else if (!Object.keys(accumulatedCities).length) {
+      list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">No active alerts</div>';
+      setStatus('ok', 'No active alerts');
+    }
     return;
   }
+
+  // new alert — cancel any pending clear, accumulate cities
+  if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+  for (const name of cities) accumulatedCities[name] = title || 'Alert';
+  cities = Object.keys(accumulatedCities);
+
+  for (const m of Object.values(activeMarkers)) m.remove();
+  activeMarkers = {};
+
 
   list.innerHTML = '';
   setStatus('active', `${cities.length} area${cities.length>1?'s':''} under alert`);
