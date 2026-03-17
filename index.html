@@ -96,7 +96,6 @@
   <div id="tabs">
     <div class="tab active" onclick="switchTab('live')">שידור חי</div>
     <div class="tab" onclick="switchTab('region')">אזור</div>
-    <div class="tab" onclick="testAlert()" style="color:#f39c12">בדיקה</div>
   </div>
 
   <div id="panel">
@@ -235,7 +234,7 @@ function renderAlerts(cities, title) {
     }
   }
   if (bounds.length) map.fitBounds(bounds, {padding:[60,60], maxZoom:10});
-  if (!testActive) recordAlert(cities, title || '');
+  recordAlert(cities, title || '');
 }
 
 // ── Record alert to Worker KV ──────────────────────────────────────────────
@@ -509,22 +508,6 @@ function renderRegionStats(label, items, matchCities) {
   }
 }
 
-// ── Test mode ──────────────────────────────────────────────────────────────
-let testActive = false;
-const TEST_CITIES = ['תל אביב - מרכז העיר', 'אשקלון - צפון', 'באר שבע - מרכז', 'אשדוד - א,ב,ד,ה'];
-
-function testAlert() {
-  switchTab('live');
-  if (testActive) {
-    testActive = false;
-    renderAlerts([]);
-  } else {
-    testActive = true;
-    renderAlerts(TEST_CITIES);
-    // auto-clear after 8 seconds like a real alert
-    setTimeout(() => { if (testActive) { testActive = false; renderAlerts([]); } }, 8000);
-  }
-}
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 (async () => {
