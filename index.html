@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; display: flex; flex-direction: row-reverse; height: 100vh; background: #111; color: #eee; direction: rtl; }
+    body { font-family: Arial, sans-serif; display: flex; flex-direction: row; height: 100vh; background: #111; color: #eee; direction: rtl; }
 
     #sidebar {
       width: 300px; min-width: 300px;
@@ -74,7 +74,7 @@
     .hist-item .hcity { font-weight: bold; }
     .hist-item .hdate { color: #888; font-size: 11px; margin-top: 2px; }
 
-    #map { flex: 1; }
+    #map { flex: 1; order: -1; }
     #error-bar {
       display: none; position: fixed; bottom: 0; left: 0; right: 0;
       background: #c0392b; color: white;
