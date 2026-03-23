@@ -95,6 +95,7 @@
 
   <div id="tabs">
     <div class="tab active" onclick="switchTab('live')">שידור חי</div>
+    <div class="tab" onclick="switchTab('today')">היום</div>
     <div class="tab" onclick="switchTab('region')">אזור</div>
   </div>
 
@@ -102,6 +103,21 @@
     <div id="tab-live">
       <div id="alert-list">
         <div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות פעילות</div>
+      </div>
+    </div>
+    <div id="tab-today" style="display:none">
+      <div id="paste-section" style="padding:10px 12px;border-bottom:1px solid #2a2a2a">
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="paste-btn" onclick="document.getElementById('paste-box').style.display=document.getElementById('paste-box').style.display==='none'?'':'none'" style="padding:5px 10px;background:#333;color:#eee;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer">📋 הדבק מפיקוד העורף</button>
+          <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" style="font-size:11px;color:#888;text-decoration:underline">פתח אתר פיקוד העורף</a>
+        </div>
+        <div id="paste-box" style="display:none;margin-top:8px">
+          <textarea id="paste-input" placeholder="העתק את כל הטקסט מעמוד ההתראות של פיקוד העורף והדבק כאן..." style="width:100%;height:80px;background:#252525;border:1px solid #3a3a3a;border-radius:4px;color:#eee;font-size:11px;padding:6px;resize:vertical"></textarea>
+          <button onclick="parsePastedAlerts()" style="margin-top:4px;padding:4px 12px;background:#e74c3c;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer">טען התראות</button>
+        </div>
+      </div>
+      <div id="today-list">
+        <div style="padding:20px;font-size:13px;color:#555;text-align:center">טוען היסטוריה...</div>
       </div>
     </div>
     <div id="tab-region" style="display:none">
@@ -173,9 +189,11 @@ function showError(msg) {
 // ── Tabs ───────────────────────────────────────────────────────────────────
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', (i===0&&tab==='live')||(i===1&&tab==='region')));
+    t.classList.toggle('active', (i===0&&tab==='live')||(i===1&&tab==='today')||(i===2&&tab==='region')));
   document.getElementById('tab-live').style.display   = tab==='live'   ? '' : 'none';
+  document.getElementById('tab-today').style.display  = tab==='today'  ? '' : 'none';
   document.getElementById('tab-region').style.display = tab==='region' ? '' : 'none';
+  if (tab === 'today') fetchOrefHistory();
 }
 
 // ── Render live alerts ─────────────────────────────────────────────────────
@@ -474,10 +492,223 @@ function renderRegionStats(label, items, matchCities) {
 }
 
 
+// ── Today's History (oref last 60min + Worker KV accumulated) ───────────
+let orefHistoryData = [];
+let lastOrefFetch = 0;
+
+function getTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+async function fetchOrefHistory() {
+  // don't re-fetch if less than 2 min since last fetch
+  if (Date.now() - lastOrefFetch < 120000 && orefHistoryData.length) {
+    renderOrefHistory(orefHistoryData);
+    return;
+  }
+  const list = document.getElementById('today-list');
+  list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">טוען היסטוריה...</div>';
+
+  // Fetch both sources in parallel:
+  // 1. Oref API (last 60 min) — works because user's browser has Israeli IP
+  // 2. Worker KV history — has accumulated alerts from WebSocket all day
+  const [orefData, workerData] = await Promise.all([
+    fetch('https://www.oref.org.il/WarningMessages/alert/History/AlertsHistory.json', {
+      headers: { 'Referer': 'https://www.oref.org.il/', 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(r => r.json()).catch(() => []),
+    fetch(`${WORKER}/history`).then(r => r.json()).catch(() => [])
+  ]);
+
+  // Convert oref format to unified format
+  const orefAlerts = (Array.isArray(orefData) ? orefData : []).map(a => ({
+    alertDate: a.alertDate,
+    data: a.data,
+    title: a.title,
+    category: a.category
+  }));
+
+  // Convert Worker KV format to unified format
+  const today = getTodayStr();
+  const workerAlerts = (Array.isArray(workerData) ? workerData : [])
+    .filter(w => w.date && w.date.startsWith(today))
+    .map(w => ({
+      alertDate: w.date,
+      data: w.name,
+      title: w.title || 'ירי רקטות וטילים',
+      category: 1
+    }));
+
+  // Merge & deduplicate (by time rounded to minute + city name)
+  const seen = new Set();
+  const merged = [];
+  for (const a of [...orefAlerts, ...workerAlerts]) {
+    // Key: date rounded to minute + city
+    const timeKey = (a.alertDate || '').slice(0, 16);
+    const key = timeKey + '|' + a.data;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(a);
+    }
+  }
+  // Sort newest first, only today
+  orefHistoryData = merged
+    .filter(a => a.alertDate && a.alertDate.startsWith(today))
+    .sort((a, b) => (b.alertDate || '').localeCompare(a.alertDate || ''));
+
+  lastOrefFetch = Date.now();
+  renderOrefHistory(orefHistoryData);
+}
+
+// Parse pasted text from oref alerts-history page
+// Format is:
+//   [alert type line]   ← e.g. "ירי רקטות וטילים" or "האירוע הסתיים"
+//   HH:MM               ← time
+//   city1, city2, ...   ← comma-separated cities
+//   HH:MM               ← next time (same type continues)
+//   city1, city2
+//   [new type line]     ← type changes
+//   ...
+function parsePastedAlerts() {
+  const text = document.getElementById('paste-input').value.trim();
+  if (!text) return;
+
+  const alerts = [];
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const today = getTodayStr();
+
+  // Extract date from "היום DD.MM.YYYY" line if present
+  let dateStr = today;
+  const dateLine = lines.find(l => /היום\s+(\d{2}\.\d{2}\.\d{4})/.test(l));
+  if (dateLine) {
+    const m = dateLine.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) dateStr = m[3] + '-' + m[2] + '-' + m[1];
+  }
+
+  const alertTypes = ['ירי רקטות וטילים', 'חדירת כלי טיס עוין', 'רעידת אדמה', 'צונאמי', 'חומרים מסוכנים', 'האירוע הסתיים', 'התגוננו', 'בדקות הקרובות'];
+  const skipLines = ['התרעות', 'בחרו יישוב', 'כל הארץ', 'לא יודעים', 'יממה אחרונה', 'הצג עוד', '3000+', '+'];
+
+  let currentTitle = '';
+  let currentTime = '';
+
+  for (const line of lines) {
+    // Skip header/UI lines
+    if (skipLines.some(s => line.startsWith(s))) continue;
+    if (/^\d+\+?\s*התרעות$/.test(line)) continue;
+    if (/^היום/.test(line)) continue;
+
+    // Check if line is an alert type
+    const foundType = alertTypes.find(t => line === t || line.startsWith(t));
+    if (foundType) {
+      if (foundType === 'בדקות הקרובות') continue; // skip warning line
+      currentTitle = foundType;
+      continue;
+    }
+
+    // Check if line is a time (HH:MM)
+    if (/^\d{1,2}:\d{2}$/.test(line)) {
+      currentTime = line.length === 4 ? '0' + line : line;
+      continue;
+    }
+
+    // Otherwise it's a cities line — needs both time and title context
+    if (currentTime && currentTitle) {
+      const cities = line.split(/,/).map(c => c.trim()).filter(c => c.length > 0);
+      const cat = currentTitle === 'האירוע הסתיים' ? 13 : 1;
+      for (const city of cities) {
+        alerts.push({
+          alertDate: dateStr + ' ' + currentTime + ':00',
+          data: city,
+          title: currentTitle,
+          category: cat
+        });
+      }
+    }
+  }
+
+  if (alerts.length) {
+    // Merge with existing data
+    const seen = new Set(orefHistoryData.map(a => (a.alertDate||'').slice(0,16) + '|' + a.data));
+    for (const a of alerts) {
+      const key = (a.alertDate||'').slice(0,16) + '|' + a.data;
+      if (!seen.has(key)) { orefHistoryData.push(a); seen.add(key); }
+    }
+    orefHistoryData.sort((a, b) => (b.alertDate || '').localeCompare(a.alertDate || ''));
+    renderOrefHistory(orefHistoryData);
+    document.getElementById('paste-box').style.display = 'none';
+    document.getElementById('paste-input').value = '';
+  } else {
+    alert('לא הצלחתי לזהות התראות בטקסט. נסה להעתיק שוב את כל העמוד.');
+  }
+}
+
+function renderOrefHistory(data) {
+  const list = document.getElementById('today-list');
+  if (!data.length) {
+    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות היום</div>';
+    return;
+  }
+
+  // Group alerts by time+type (same second = same volley)
+  const groups = [];
+  let currentGroup = null;
+  for (const item of data) {
+    const time = item.alertDate ? item.alertDate.slice(11, 16) : '';
+    const fullTime = item.alertDate ? item.alertDate.slice(11, 19) : '';
+    const isEnd = item.category === 13;
+    if (!currentGroup || currentGroup.fullTime !== fullTime || currentGroup.isEnd !== isEnd) {
+      currentGroup = { time, fullTime, title: item.title, isEnd, cities: [] };
+      groups.push(currentGroup);
+    }
+    currentGroup.cities.push(item.data);
+  }
+
+  list.innerHTML = '';
+
+  // Summary header
+  const alertOnly = data.filter(d => d.category !== 13);
+  const header = document.createElement('div');
+  header.style.cssText = 'padding:10px 14px;font-size:12px;color:#888;border-bottom:1px solid #2a2a2a';
+  header.textContent = `${alertOnly.length} התראות היום (עודכן ${new Date().toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'})})`;
+  list.appendChild(header);
+
+  for (const g of groups) {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px';
+
+    const titleColor = g.isEnd ? '#2ecc71' : '#e74c3c';
+    const citiesText = g.cities.map(city => {
+      const c = citiesMap[city];
+      const nameEn = c ? c.name_en : '';
+      return nameEn ? `${city} (${nameEn})` : city;
+    }).join(', ');
+
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:bold;color:${titleColor}">${g.title}</span>
+        <span style="font-size:11px;color:#888">${g.time}</span>
+      </div>
+      <div style="margin-top:4px;color:#ccc;font-size:12px">${citiesText}</div>
+    `;
+    list.appendChild(div);
+  }
+}
+
+// Schedule fetch every 5 min to accumulate throughout the day
+function schedulePeriodicFetch() {
+  setInterval(() => {
+    lastOrefFetch = 0; // force refresh
+    fetchOrefHistory();
+  }, 300000); // every 5 minutes
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 (async () => {
   try { await loadCities(); } catch(e) { showError('Failed to load cities: '+e.message); }
   connectWS();
+  // Fetch oref history on page load + accumulate every 5 min
+  fetchOrefHistory();
+  schedulePeriodicFetch();
 })();
 </script>
 <style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}</style>
