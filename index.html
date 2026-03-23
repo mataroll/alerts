@@ -62,17 +62,6 @@
     .alert-item .zone { font-size: 11px; color: #888; margin-top: 2px; }
     .alert-item .countdown { font-size: 11px; color: #f39c12; margin-top: 2px; }
 
-    /* Region */
-    #region-panel { padding: 12px; }
-    #region-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; }
-    .stat-box { background: #222; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
-    .stat-box .label { font-size: 11px; color: #888; margin-bottom: 4px; }
-    .stat-box .value { font-size: 20px; font-weight: bold; color: #e74c3c; }
-    .stat-box .value.none { color: #2ecc71; font-size: 13px; }
-    #history-list { margin-top: 10px; }
-    .hist-item { padding: 7px 0; border-bottom: 1px solid #2a2a2a; font-size: 12px; }
-    .hist-item .hcity { font-weight: bold; }
-    .hist-item .hdate { color: #888; font-size: 11px; margin-top: 2px; }
 
     #map { flex: 1; }
     #error-bar {
@@ -95,8 +84,7 @@
 
   <div id="tabs">
     <div class="tab active" onclick="switchTab('live')">שידור חי</div>
-    <div class="tab" onclick="switchTab('today')">ארכיון</div>
-    <div class="tab" onclick="switchTab('region')">אזור</div>
+    <div class="tab" onclick="switchTab('history')">התראות</div>
   </div>
 
   <div id="panel">
@@ -105,31 +93,27 @@
         <div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות פעילות</div>
       </div>
     </div>
-    <div id="tab-today" style="display:none">
-      <div id="paste-section" style="padding:10px 12px;border-bottom:1px solid #2a2a2a">
+    <div id="tab-history" style="display:none">
+      <!-- Paste section -->
+      <div style="padding:8px 12px;border-bottom:1px solid #2a2a2a">
         <div style="display:flex;gap:8px;align-items:center">
-          <button id="paste-btn" onclick="document.getElementById('paste-box').style.display=document.getElementById('paste-box').style.display==='none'?'':'none'" style="padding:5px 10px;background:#333;color:#eee;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer">📋 הדבק מפיקוד העורף</button>
-          <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" style="font-size:11px;color:#888;text-decoration:underline">פתח אתר פיקוד העורף</a>
+          <button onclick="document.getElementById('paste-box').style.display=document.getElementById('paste-box').style.display==='none'?'':'none'" style="padding:4px 8px;background:#333;color:#eee;border:1px solid #555;border-radius:4px;font-size:11px;cursor:pointer">הדבק נתונים</button>
+          <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" style="font-size:11px;color:#666;text-decoration:underline">אתר פיקוד העורף</a>
         </div>
         <div id="paste-box" style="display:none;margin-top:8px">
-          <textarea id="paste-input" placeholder="העתק את כל הטקסט מעמוד ההתראות של פיקוד העורף והדבק כאן..." style="width:100%;height:80px;background:#252525;border:1px solid #3a3a3a;border-radius:4px;color:#eee;font-size:11px;padding:6px;resize:vertical"></textarea>
-          <button onclick="parsePastedAlerts()" style="margin-top:4px;padding:4px 12px;background:#e74c3c;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer">טען התראות</button>
+          <textarea id="paste-input" placeholder="Ctrl+A, Ctrl+C מעמוד פיקוד העורף, הדבק כאן..." style="width:100%;height:70px;background:#252525;border:1px solid #3a3a3a;border-radius:4px;color:#eee;font-size:11px;padding:6px;resize:vertical"></textarea>
+          <button onclick="parsePastedAlerts()" style="margin-top:4px;padding:4px 12px;background:#e74c3c;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer">טען</button>
         </div>
       </div>
+      <!-- Filters -->
+      <div id="filter-bar" style="padding:8px 12px;border-bottom:1px solid #2a2a2a"></div>
+      <!-- City/region filter -->
+      <div style="padding:6px 12px;border-bottom:1px solid #2a2a2a">
+        <input id="hist-search" type="text" placeholder="סנן לפי עיר או אזור..." oninput="applyFilters()" style="width:100%;padding:5px 8px;background:#252525;border:1px solid #3a3a3a;border-radius:4px;color:#eee;font-size:12px;outline:none">
+      </div>
+      <!-- Results -->
       <div id="today-list">
-        <div style="padding:20px;font-size:13px;color:#555;text-align:center">טוען היסטוריה...</div>
-      </div>
-    </div>
-    <div id="tab-region" style="display:none">
-      <div id="region-panel">
-        <div id="empty-region" style="color:#555;font-size:13px;text-align:center;padding-top:20px">
-          חפש עיר או אזור למעלה
-        </div>
-        <div id="region-content" style="display:none">
-          <div id="region-title"></div>
-          <div id="stats-boxes"></div>
-          <div id="history-list"></div>
-        </div>
+        <div style="padding:20px;font-size:13px;color:#555;text-align:center">טוען...</div>
       </div>
     </div>
   </div>
@@ -189,11 +173,10 @@ function showError(msg) {
 // ── Tabs ───────────────────────────────────────────────────────────────────
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', (i===0&&tab==='live')||(i===1&&tab==='today')||(i===2&&tab==='region')));
-  document.getElementById('tab-live').style.display   = tab==='live'   ? '' : 'none';
-  document.getElementById('tab-today').style.display  = tab==='today'  ? '' : 'none';
-  document.getElementById('tab-region').style.display = tab==='region' ? '' : 'none';
-  if (tab === 'today') fetchOrefHistory();
+    t.classList.toggle('active', (i===0&&tab==='live')||(i===1&&tab==='history')));
+  document.getElementById('tab-live').style.display    = tab==='live'    ? '' : 'none';
+  document.getElementById('tab-history').style.display = tab==='history' ? '' : 'none';
+  if (tab === 'history') fetchOrefHistory();
 }
 
 // ── Render live alerts ─────────────────────────────────────────────────────
@@ -373,123 +356,12 @@ function selectResult(r) {
     bounds.push([c.lat,c.lng]);
   }
   if (bounds.length) map.fitBounds(bounds, {padding:[60,60], maxZoom:11});
-  switchTab('region');
-  loadRegionStats(r.label, match); // async, updates panel when ready
+  // Switch to history tab and filter by the selected city/zone
+  document.getElementById('hist-search').value = r.label;
+  switchTab('history');
+  applyFilters();
 }
 
-// ── History (from Worker KV — recorded 24/7) ───────────────────────────────
-let cachedHistory = null;
-
-async function getHistory() {
-  if (cachedHistory) return cachedHistory;
-  try {
-    const res = await fetch(`${WORKER}/history`);
-    cachedHistory = await res.json();
-    setTimeout(() => cachedHistory = null, 60000); // refresh every minute
-  } catch { cachedHistory = []; }
-  return cachedHistory;
-}
-
-// ── Region stats ───────────────────────────────────────────────────────────
-async function loadRegionStats(label, matchCities) {
-  document.getElementById('empty-region').style.display = 'none';
-  document.getElementById('region-content').style.display = '';
-  document.getElementById('region-title').textContent = label;
-  document.getElementById('stats-boxes').innerHTML = '<div style="color:#888;font-size:12px">טוען היסטוריה...</div>';
-  document.getElementById('history-list').innerHTML = '';
-
-  const cityValues = new Set(matchCities.map(c => c.value));
-  const cityNames  = new Set(matchCities.map(c => c.name));
-
-  const history  = await getHistory();
-  const relevant = history.filter(h => cityValues.has(h.name) || cityNames.has(h.name));
-
-  const total = relevant.length;
-  const last  = relevant[0]?.date || null;
-
-  const counts = {};
-  for (const h of relevant) {
-    const c    = citiesMap[h.name];
-    const name = c ? (c.name_en||h.name) : h.name;
-    counts[name] = (counts[name]||0) + 1;
-  }
-  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
-
-  document.getElementById('stats-boxes').innerHTML = `
-    <div class="stat-box">
-      <div class="label">סה"כ התראות שנקלטו</div>
-      <div class="value">${total || '—'}</div>
-    </div>
-    <div class="stat-box">
-      <div class="label">התראה אחרונה</div>
-      <div class="value ${!last?'none':''}" style="${last?'':'font-size:13px'}">${last || 'טרם נקלטה'}</div>
-    </div>
-    ${top ? `<div class="stat-box"><div class="label">העיר הכי מותקפת</div><div class="value" style="font-size:15px">${top[0]} <span style="font-size:11px;color:#aaa">${top[1]}x</span></div></div>` : ''}
-  `;
-
-  const histEl = document.getElementById('history-list');
-  if (!relevant.length) {
-    histEl.innerHTML = '<div style="color:#555;font-size:12px;padding-top:8px">לא נקלטו התראות לאזור זה</div>';
-    return;
-  }
-  histEl.innerHTML = '<div style="font-size:11px;color:#888;margin-bottom:6px">התראות שנקלטו</div>';
-  for (const h of relevant.slice(0,50)) {
-    const c    = citiesMap[h.name];
-    const name = c ? (c.name_en||h.name) : h.name;
-    const d = document.createElement('div');
-    d.className = 'hist-item';
-    d.innerHTML = `<div class="hcity">${name}</div><div class="hdate">${h.date} · ${h.title}</div>`;
-    histEl.appendChild(d);
-  }
-}
-
-function renderRegionStats(label, items, matchCities) {
-  const total = items.length;
-
-  // find last alert date
-  const dates = items.map(i => i.date || i.alertDate || i.time || '').filter(Boolean).sort().reverse();
-  const last  = dates[0] ? dates[0].slice(0,16) : null;
-
-  // most hit city
-  const counts = {};
-  for (const i of items) {
-    const city = i.city || i.name || i.data || i.area || '';
-    const c    = citiesMap[city];
-    const name = c ? (c.name_en||city) : city;
-    if (name) counts[name] = (counts[name]||0) + 1;
-  }
-  const top = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
-
-  document.getElementById('stats-boxes').innerHTML = `
-    <div class="stat-box">
-      <div class="label">התראות ב-90 יום אחרון</div>
-      <div class="value">${total}</div>
-    </div>
-    <div class="stat-box">
-      <div class="label">התראה אחרונה</div>
-      <div class="value ${!last?'none':''}" style="${last?'':'font-size:13px'}">${last || 'אין רשומה'}</div>
-    </div>
-    ${top ? `<div class="stat-box"><div class="label">העיר הכי מותקפת</div><div class="value" style="font-size:15px">${top[0]} <span style="font-size:11px;color:#aaa">${top[1]}x</span></div></div>` : ''}
-  `;
-
-  const histEl = document.getElementById('history-list');
-  if (!items.length) {
-    histEl.innerHTML = '<div style="color:#555;font-size:12px;padding-top:8px">אין התראות ב-90 הימים האחרונים</div>';
-    return;
-  }
-  histEl.innerHTML = '<div style="font-size:11px;color:#888;margin-bottom:6px">התראות אחרונות</div>';
-  for (const item of items.slice(0,30)) {
-    const city  = item.city || item.name || item.data || item.area || '';
-    const c     = citiesMap[city];
-    const name  = c ? (c.name_en||city) : city;
-    const date  = (item.date || item.alertDate || item.time || '').slice(0,16);
-    const type  = item.title || item.type || item.category || '';
-    const d = document.createElement('div');
-    d.className = 'hist-item';
-    d.innerHTML = `<div class="hcity">${name}</div><div class="hdate">${date}${type?' · '+type:''}</div>`;
-    histEl.appendChild(d);
-  }
-}
 
 
 // ── Alerts Archive (persistent localStorage + live sources) ─────────────
@@ -640,20 +512,39 @@ function parsePastedAlerts() {
   }
 }
 
-let archiveFilter = 'today'; // 'today', 'all', or a date string 'YYYY-MM-DD'
+let archiveFilter = 'today'; // 'today', 'all', or 'YYYY-MM-DD'
+
+function applyFilters() {
+  renderOrefHistory(orefHistoryData);
+}
 
 function renderOrefHistory(data) {
+  const filterBar = document.getElementById('filter-bar');
   const list = document.getElementById('today-list');
+
   if (!data.length) {
-    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות בארכיון</div>';
+    filterBar.innerHTML = '';
+    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות. הדבק נתונים מפיקוד העורף.</div>';
     return;
   }
 
-  // Collect unique dates for filter
-  const dates = [...new Set(data.map(a => (a.alertDate||'').slice(0,10)))].sort().reverse();
   const today = getTodayStr();
+  const dates = [...new Set(data.map(a => (a.alertDate||'').slice(0,10)))].sort().reverse();
+  const cityQuery = (document.getElementById('hist-search')?.value || '').trim().toLowerCase();
 
-  // Filter data
+  // ── Date filter buttons ──
+  const makeBtn = (label, value) => {
+    const active = archiveFilter === value;
+    return `<button onclick="archiveFilter='${value}';applyFilters()" style="padding:3px 8px;font-size:11px;border:1px solid ${active?'#e74c3c':'#444'};background:${active?'#e74c3c':'#2a2a2a'};color:${active?'#fff':'#aaa'};border-radius:3px;cursor:pointer">${label}</button>`;
+  };
+  let btns = makeBtn('היום', 'today') + makeBtn('הכל', 'all');
+  for (const d of dates) {
+    if (d === today) continue;
+    btns += makeBtn(d.slice(8,10) + '/' + d.slice(5,7), d);
+  }
+  filterBar.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap">${btns}</div>`;
+
+  // ── Apply date filter ──
   let filtered = data;
   if (archiveFilter === 'today') {
     filtered = data.filter(a => (a.alertDate||'').startsWith(today));
@@ -661,41 +552,44 @@ function renderOrefHistory(data) {
     filtered = data.filter(a => (a.alertDate||'').startsWith(archiveFilter));
   }
 
+  // ── Apply city/region text filter ──
+  if (cityQuery) {
+    const isHeb = /[\u0590-\u05FF]/.test(cityQuery);
+    filtered = filtered.filter(a => {
+      const city = a.data || '';
+      const c = citiesMap[city];
+      if (isHeb) {
+        return city.includes(cityQuery) || (c && (c.zone||'').includes(cityQuery));
+      } else {
+        const en = (c ? c.name_en||'' : '').toLowerCase();
+        const zone = (c ? c.zone_en||'' : '').toLowerCase();
+        return en.includes(cityQuery) || zone.includes(cityQuery);
+      }
+    });
+  }
+
+  // ── Skip "event ended" unless specifically searched ──
+  if (!cityQuery) {
+    filtered = filtered.filter(a => a.category !== 13);
+  }
+
   list.innerHTML = '';
 
-  // Date filter bar
-  const filterBar = document.createElement('div');
-  filterBar.style.cssText = 'padding:8px 12px;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;flex-wrap:wrap;align-items:center';
-  const makeBtn = (label, value) => {
-    const active = archiveFilter === value;
-    return `<button onclick="archiveFilter='${value}';renderOrefHistory(orefHistoryData)" style="padding:3px 8px;font-size:11px;border:1px solid ${active?'#e74c3c':'#444'};background:${active?'#e74c3c':'#2a2a2a'};color:${active?'#fff':'#aaa'};border-radius:3px;cursor:pointer">${label}</button>`;
-  };
-  let btns = makeBtn('היום', 'today') + makeBtn('הכל', 'all');
-  for (const d of dates) {
-    if (d === today) continue;
-    const label = d.slice(8,10) + '/' + d.slice(5,7);
-    btns += makeBtn(label, d);
-  }
-  filterBar.innerHTML = btns;
-  list.appendChild(filterBar);
-
   // Summary
-  const alertOnly = filtered.filter(d => d.category !== 13);
   const header = document.createElement('div');
   header.style.cssText = 'padding:8px 14px;font-size:12px;color:#888;border-bottom:1px solid #2a2a2a';
-  const total = loadArchive().length;
-  header.textContent = `${alertOnly.length} התראות${archiveFilter==='all'?' בארכיון':''} (${total} סה"כ בארכיון)`;
+  header.textContent = `${filtered.length} התראות${cityQuery ? ' (מסונן)' : ''} · ${data.length} סה"כ בארכיון`;
   list.appendChild(header);
 
   if (!filtered.length) {
     const empty = document.createElement('div');
     empty.style.cssText = 'padding:20px;font-size:13px;color:#555;text-align:center';
-    empty.textContent = 'אין התראות לתאריך זה';
+    empty.textContent = 'אין התראות';
     list.appendChild(empty);
     return;
   }
 
-  // Group by date then by time+type
+  // ── Group by date → time+type ──
   let lastDate = '';
   let currentGroup = null;
   const groups = [];
@@ -712,7 +606,6 @@ function renderOrefHistory(data) {
   }
 
   for (const g of groups) {
-    // Date separator
     if (g.date !== lastDate) {
       lastDate = g.date;
       const sep = document.createElement('div');
@@ -723,7 +616,6 @@ function renderOrefHistory(data) {
 
     const div = document.createElement('div');
     div.style.cssText = 'padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px';
-
     const titleColor = g.isEnd ? '#2ecc71' : '#e74c3c';
     const citiesText = g.cities.map(city => {
       const c = citiesMap[city];
