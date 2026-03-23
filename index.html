@@ -95,7 +95,7 @@
 
   <div id="tabs">
     <div class="tab active" onclick="switchTab('live')">שידור חי</div>
-    <div class="tab" onclick="switchTab('today')">היום</div>
+    <div class="tab" onclick="switchTab('today')">ארכיון</div>
     <div class="tab" onclick="switchTab('region')">אזור</div>
   </div>
 
@@ -492,13 +492,40 @@ function renderRegionStats(label, items, matchCities) {
 }
 
 
-// ── Today's History (oref last 60min + Worker KV accumulated) ───────────
+// ── Alerts Archive (persistent localStorage + live sources) ─────────────
+const ARCHIVE_KEY = 'oref_alerts_archive';
 let orefHistoryData = [];
 let lastOrefFetch = 0;
 
 function getTodayStr() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+// Load all archived alerts from localStorage
+function loadArchive() {
+  try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+// Save alerts to localStorage archive (merge + deduplicate)
+function saveToArchive(newAlerts) {
+  const existing = loadArchive();
+  const seen = new Set(existing.map(a => (a.alertDate||'').slice(0,16) + '|' + a.data));
+  let added = 0;
+  for (const a of newAlerts) {
+    const key = (a.alertDate||'').slice(0,16) + '|' + a.data;
+    if (!seen.has(key)) {
+      existing.push(a);
+      seen.add(key);
+      added++;
+    }
+  }
+  if (added > 0) {
+    existing.sort((a, b) => (b.alertDate || '').localeCompare(a.alertDate || ''));
+    localStorage.setItem(ARCHIVE_KEY, JSON.stringify(existing));
+  }
+  return existing;
 }
 
 async function fetchOrefHistory() {
@@ -510,9 +537,7 @@ async function fetchOrefHistory() {
   const list = document.getElementById('today-list');
   list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">טוען היסטוריה...</div>';
 
-  // Fetch both sources in parallel:
-  // 1. Oref API (last 60 min) — works because user's browser has Israeli IP
-  // 2. Worker KV history — has accumulated alerts from WebSocket all day
+  // Fetch both live sources in parallel
   const [orefData, workerData] = await Promise.all([
     fetch('https://www.oref.org.il/WarningMessages/alert/History/AlertsHistory.json', {
       headers: { 'Referer': 'https://www.oref.org.il/', 'X-Requested-With': 'XMLHttpRequest' }
@@ -520,42 +545,20 @@ async function fetchOrefHistory() {
     fetch(`${WORKER}/history`).then(r => r.json()).catch(() => [])
   ]);
 
-  // Convert oref format to unified format
+  // Convert oref format
   const orefAlerts = (Array.isArray(orefData) ? orefData : []).map(a => ({
-    alertDate: a.alertDate,
-    data: a.data,
-    title: a.title,
-    category: a.category
+    alertDate: a.alertDate, data: a.data, title: a.title, category: a.category
   }));
 
-  // Convert Worker KV format to unified format
-  const today = getTodayStr();
+  // Convert Worker KV format
   const workerAlerts = (Array.isArray(workerData) ? workerData : [])
-    .filter(w => w.date && w.date.startsWith(today))
+    .filter(w => w.date)
     .map(w => ({
-      alertDate: w.date,
-      data: w.name,
-      title: w.title || 'ירי רקטות וטילים',
-      category: 1
+      alertDate: w.date, data: w.name, title: w.title || 'ירי רקטות וטילים', category: 1
     }));
 
-  // Merge & deduplicate (by time rounded to minute + city name)
-  const seen = new Set();
-  const merged = [];
-  for (const a of [...orefAlerts, ...workerAlerts]) {
-    // Key: date rounded to minute + city
-    const timeKey = (a.alertDate || '').slice(0, 16);
-    const key = timeKey + '|' + a.data;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(a);
-    }
-  }
-  // Sort newest first, only today
-  orefHistoryData = merged
-    .filter(a => a.alertDate && a.alertDate.startsWith(today))
-    .sort((a, b) => (b.alertDate || '').localeCompare(a.alertDate || ''));
-
+  // Save new data to permanent archive & get full archive back
+  orefHistoryData = saveToArchive([...orefAlerts, ...workerAlerts]);
   lastOrefFetch = Date.now();
   renderOrefHistory(orefHistoryData);
 }
@@ -627,13 +630,8 @@ function parsePastedAlerts() {
   }
 
   if (alerts.length) {
-    // Merge with existing data
-    const seen = new Set(orefHistoryData.map(a => (a.alertDate||'').slice(0,16) + '|' + a.data));
-    for (const a of alerts) {
-      const key = (a.alertDate||'').slice(0,16) + '|' + a.data;
-      if (!seen.has(key)) { orefHistoryData.push(a); seen.add(key); }
-    }
-    orefHistoryData.sort((a, b) => (b.alertDate || '').localeCompare(a.alertDate || ''));
+    // Save to permanent archive
+    orefHistoryData = saveToArchive(alerts);
     renderOrefHistory(orefHistoryData);
     document.getElementById('paste-box').style.display = 'none';
     document.getElementById('paste-input').value = '';
@@ -642,37 +640,87 @@ function parsePastedAlerts() {
   }
 }
 
+let archiveFilter = 'today'; // 'today', 'all', or a date string 'YYYY-MM-DD'
+
 function renderOrefHistory(data) {
   const list = document.getElementById('today-list');
   if (!data.length) {
-    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות היום</div>';
+    list.innerHTML = '<div style="padding:20px;font-size:13px;color:#555;text-align:center">אין התראות בארכיון</div>';
     return;
   }
 
-  // Group alerts by time+type (same second = same volley)
-  const groups = [];
+  // Collect unique dates for filter
+  const dates = [...new Set(data.map(a => (a.alertDate||'').slice(0,10)))].sort().reverse();
+  const today = getTodayStr();
+
+  // Filter data
+  let filtered = data;
+  if (archiveFilter === 'today') {
+    filtered = data.filter(a => (a.alertDate||'').startsWith(today));
+  } else if (archiveFilter !== 'all') {
+    filtered = data.filter(a => (a.alertDate||'').startsWith(archiveFilter));
+  }
+
+  list.innerHTML = '';
+
+  // Date filter bar
+  const filterBar = document.createElement('div');
+  filterBar.style.cssText = 'padding:8px 12px;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+  const makeBtn = (label, value) => {
+    const active = archiveFilter === value;
+    return `<button onclick="archiveFilter='${value}';renderOrefHistory(orefHistoryData)" style="padding:3px 8px;font-size:11px;border:1px solid ${active?'#e74c3c':'#444'};background:${active?'#e74c3c':'#2a2a2a'};color:${active?'#fff':'#aaa'};border-radius:3px;cursor:pointer">${label}</button>`;
+  };
+  let btns = makeBtn('היום', 'today') + makeBtn('הכל', 'all');
+  for (const d of dates) {
+    if (d === today) continue;
+    const label = d.slice(8,10) + '/' + d.slice(5,7);
+    btns += makeBtn(label, d);
+  }
+  filterBar.innerHTML = btns;
+  list.appendChild(filterBar);
+
+  // Summary
+  const alertOnly = filtered.filter(d => d.category !== 13);
+  const header = document.createElement('div');
+  header.style.cssText = 'padding:8px 14px;font-size:12px;color:#888;border-bottom:1px solid #2a2a2a';
+  const total = loadArchive().length;
+  header.textContent = `${alertOnly.length} התראות${archiveFilter==='all'?' בארכיון':''} (${total} סה"כ בארכיון)`;
+  list.appendChild(header);
+
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:20px;font-size:13px;color:#555;text-align:center';
+    empty.textContent = 'אין התראות לתאריך זה';
+    list.appendChild(empty);
+    return;
+  }
+
+  // Group by date then by time+type
+  let lastDate = '';
   let currentGroup = null;
-  for (const item of data) {
+  const groups = [];
+  for (const item of filtered) {
+    const date = (item.alertDate||'').slice(0, 10);
     const time = item.alertDate ? item.alertDate.slice(11, 16) : '';
     const fullTime = item.alertDate ? item.alertDate.slice(11, 19) : '';
     const isEnd = item.category === 13;
-    if (!currentGroup || currentGroup.fullTime !== fullTime || currentGroup.isEnd !== isEnd) {
-      currentGroup = { time, fullTime, title: item.title, isEnd, cities: [] };
+    if (!currentGroup || currentGroup.date !== date || currentGroup.fullTime !== fullTime || currentGroup.isEnd !== isEnd) {
+      currentGroup = { date, time, fullTime, title: item.title, isEnd, cities: [] };
       groups.push(currentGroup);
     }
     currentGroup.cities.push(item.data);
   }
 
-  list.innerHTML = '';
-
-  // Summary header
-  const alertOnly = data.filter(d => d.category !== 13);
-  const header = document.createElement('div');
-  header.style.cssText = 'padding:10px 14px;font-size:12px;color:#888;border-bottom:1px solid #2a2a2a';
-  header.textContent = `${alertOnly.length} התראות היום (עודכן ${new Date().toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'})})`;
-  list.appendChild(header);
-
   for (const g of groups) {
+    // Date separator
+    if (g.date !== lastDate) {
+      lastDate = g.date;
+      const sep = document.createElement('div');
+      sep.style.cssText = 'padding:6px 14px;font-size:11px;font-weight:bold;color:#f39c12;background:#1e1e1e;border-bottom:1px solid #333';
+      sep.textContent = g.date.slice(8,10) + '/' + g.date.slice(5,7) + '/' + g.date.slice(0,4);
+      list.appendChild(sep);
+    }
+
     const div = document.createElement('div');
     div.style.cssText = 'padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px';
 
@@ -706,7 +754,9 @@ function schedulePeriodicFetch() {
 (async () => {
   try { await loadCities(); } catch(e) { showError('Failed to load cities: '+e.message); }
   connectWS();
-  // Fetch oref history on page load + accumulate every 5 min
+  // Load archive from localStorage immediately, then fetch fresh data
+  orefHistoryData = loadArchive();
+  if (orefHistoryData.length) renderOrefHistory(orefHistoryData);
   fetchOrefHistory();
   schedulePeriodicFetch();
 })();
